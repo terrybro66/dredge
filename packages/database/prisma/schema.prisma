@@ -1,0 +1,13 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// TODO - Step 4: Define your three starting models
+// model Query        { ... }
+// model CrimeResult  { ... }
+// model SchemaVersion { ... }

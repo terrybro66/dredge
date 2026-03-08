@@ -7,7 +7,29 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// TODO - Step 4: Define your three starting models
-// model Query        { ... }
-// model CrimeResult  { ... }
-// model SchemaVersion { ... }
+model Query {
+  id        String        @id @default(cuid())
+  text      String
+  createdAt DateTime      @default(now())
+  results   CrimeResult[]
+}
+
+model CrimeResult {
+  id        String   @id @default(cuid())
+  queryId   String
+  query     Query    @relation(fields: [queryId], references: [id])
+  category  String
+  street    String?
+  month     String?
+  latitude  Float?
+  longitude Float?
+  raw       Json
+  createdAt DateTime @default(now())
+}
+
+model SchemaVersion {
+  id          String   @id @default(cuid())
+  triggeredBy String
+  sql         String
+  appliedAt   DateTime @default(now())
+}

@@ -1,6 +1,10 @@
 {
   "name": "@dredge/database",
   "version": "0.0.1",
+  "main": "index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
   "scripts": {
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

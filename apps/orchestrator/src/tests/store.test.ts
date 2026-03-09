@@ -1,74 +1,158 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("../intent", () => ({}));
+// ── Mock Prisma ───────────────────────────────────────────────────────────────
 
-vi.mock("../db", () => {
-  const mockCreate = vi.fn().mockResolvedValue({});
-  const mockTransaction = vi.fn().mockImplementation((ops) => Promise.all(ops));
-  return {
-    prisma: {
-      $transaction: mockTransaction,
+vi.mock("@prisma/client", () => {
+  const mockCreate = vi.fn();
+  const mockTransaction = vi.fn();
+  function PrismaClient() {
+    return {
       crimeResult: { create: mockCreate },
-    },
-  };
+      $transaction: mockTransaction,
+    };
+  }
+  PrismaClient._mockCreate = mockCreate;
+  PrismaClient._mockTransaction = mockTransaction;
+  return { PrismaClient };
 });
 
-import { prisma } from "../db";
+import { PrismaClient } from "@prisma/client";
 import { storeResults } from "../store";
-import type { QueryPlan } from "../store";
 
-const basePlan: QueryPlan = {
+const mockCreate = (PrismaClient as any)._mockCreate as ReturnType<
+  typeof vi.fn
+>;
+const mockTransaction = (PrismaClient as any)._mockTransaction as ReturnType<
+  typeof vi.fn
+>;
+import type { QueryPlan } from "../intent";
+import type { RawCrime } from "../fetcher";
+
+// ── Fixtures ──────────────────────────────────────────────────────────────────
+
+const plan: QueryPlan = {
   category: "burglary",
   date: "2024-01",
-  poly: "52.2,0.1:52.3,0.2",
-  viz_hint: "table",
+  poly: "52.2,0.1:52.3,0.2:52.3,0.3:52.2,0.3",
+  viz_hint: "map",
 };
 
-const makeCrime = (overrides = {}) => ({
-  category: "burglary",
-  location: {
-    street: { name: "High Street" },
-    latitude: "52.2053",
-    longitude: "0.1218",
-  },
-  month: "2024-01",
-  ...overrides,
-});
+function makeCrime(overrides: Partial<RawCrime> = {}): RawCrime {
+  return {
+    category: "burglary",
+    location: {
+      latitude: "52.2100",
+      longitude: "0.1200",
+      street: { id: 1, name: "On or near High Street" },
+    },
+    month: "2024-01",
+    outcome_status: { category: "Under investigation", date: "2024-02" },
+    persistent_id: "abc123",
+    context: "",
+    id: 1001,
+    location_type: "Force",
+    location_subtype: "",
+    ...overrides,
+  };
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  mockCreate.mockReset();
+  mockTransaction.mockReset();
+  mockTransaction.mockImplementation((ops: Promise<unknown>[]) =>
+    Promise.all(ops),
+  );
 });
 
 describe("storeResults", () => {
-  it("calls prisma.$transaction with correct number of creates", async () => {
-    const crimes = [makeCrime(), makeCrime(), makeCrime()];
-    await storeResults("query-1", basePlan, crimes);
-    expect(prisma.crimeResult.create).toHaveBeenCalledTimes(3);
+  it("does nothing when crimes array is empty", async () => {
+    await storeResults("query-1", plan, []);
+
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("parses latitude as a float", async () => {
-    await storeResults("query-1", basePlan, [makeCrime()]);
-    const callData = (prisma.crimeResult.create as any).mock.calls[0][0].data;
-    expect(callData.latitude).toBe(52.2053);
-    expect(typeof callData.latitude).toBe("number");
+  it("creates one row per crime inside a transaction", async () => {
+    mockCreate.mockResolvedValue({});
+
+    const crimes = [
+      makeCrime({ persistent_id: "a1" }),
+      makeCrime({ persistent_id: "a2" }),
+    ];
+
+    await storeResults("query-1", plan, crimes);
+
+    expect(mockTransaction).toHaveBeenCalledOnce();
+    expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
-  it("parses longitude as a float", async () => {
-    await storeResults("query-1", basePlan, [makeCrime()]);
-    const callData = (prisma.crimeResult.create as any).mock.calls[0][0].data;
-    expect(callData.longitude).toBe(0.1218);
-    expect(typeof callData.longitude).toBe("number");
+  it("maps RawCrime fields correctly", async () => {
+    mockCreate.mockResolvedValue({});
+
+    await storeResults("query-42", plan, [makeCrime()]);
+
+    expect(mockCreate).toHaveBeenCalledWith({
+      data: {
+        query_id: "query-42",
+        persistent_id: "abc123",
+        category: "burglary",
+        month: "2024-01",
+        street: "On or near High Street",
+        latitude: 52.21,
+        longitude: 0.12,
+        outcome_category: "Under investigation",
+        outcome_date: "2024-02",
+        location_type: "Force",
+        context: "",
+      },
+    });
   });
 
-  it("stores the full raw crime object", async () => {
-    const crime = makeCrime({ extra_field: "outcome_status" });
-    await storeResults("query-1", basePlan, [crime]);
-    const callData = (prisma.crimeResult.create as any).mock.calls[0][0].data;
-    expect(callData.raw).toMatchObject(crime);
+  it("sets outcome fields to null when outcome_status is null", async () => {
+    mockCreate.mockResolvedValue({});
+
+    await storeResults("query-1", plan, [makeCrime({ outcome_status: null })]);
+
+    expect(mockCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        outcome_category: null,
+        outcome_date: null,
+      }),
+    });
   });
 
-  it("handles an empty crimes array without calling transaction", async () => {
-    await storeResults("query-1", basePlan, []);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+  it("parses latitude and longitude as floats", async () => {
+    mockCreate.mockResolvedValue({});
+
+    await storeResults("query-1", plan, [
+      makeCrime({
+        location: {
+          latitude: "51.5074",
+          longitude: "-0.1278",
+          street: { id: 1, name: "Test Street" },
+        },
+      }),
+    ]);
+
+    expect(mockCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        latitude: 51.5074,
+        longitude: -0.1278,
+      }),
+    });
+  });
+
+  it("handles a large batch without error", async () => {
+    mockCreate.mockResolvedValue({});
+
+    const crimes = Array.from({ length: 100 }, (_, i) =>
+      makeCrime({ persistent_id: `id-${i}` }),
+    );
+
+    await storeResults("query-1", plan, crimes);
+
+    expect(mockCreate).toHaveBeenCalledTimes(100);
   });
 });

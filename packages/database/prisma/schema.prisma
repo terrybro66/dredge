@@ -8,28 +8,40 @@ datasource db {
 }
 
 model Query {
-  id        String        @id @default(cuid())
-  text      String
-  createdAt DateTime      @default(now())
-  results   CrimeResult[]
+  id         String        @id @default(cuid())
+  text       String
+  category   String
+  date       String
+  poly       String
+  viz_hint   String
+  created_at DateTime      @default(now())
+  results    CrimeResult[]
 }
 
 model CrimeResult {
-  id        String   @id @default(cuid())
-  queryId   String
-  query     Query    @relation(fields: [queryId], references: [id])
-  category  String
-  street    String?
-  month     String?
-  latitude  Float?
-  longitude Float?
-  raw       Json
-  createdAt DateTime @default(now())
+  id               Int      @id @default(autoincrement())
+  query_id         String
+  query            Query    @relation(fields: [query_id], references: [id])
+  persistent_id    String
+  category         String
+  month            String
+  street           String
+  latitude         Float
+  longitude        Float
+  outcome_category String?
+  outcome_date     String?
+  location_type    String
+  context          String?
+  created_at       DateTime @default(now())
+
+  @@map("crime_results")
 }
 
 model SchemaVersion {
-  id          String   @id @default(cuid())
-  triggeredBy String
-  sql         String
-  appliedAt   DateTime @default(now())
+  id           Int      @id @default(autoincrement())
+  table_name   String
+  column_name  String
+  column_type  String
+  triggered_by String
+  created_at   DateTime @default(now())
 }

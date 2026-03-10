@@ -92,6 +92,11 @@ describe("POST /query", () => {
     mockIntent.parseIntent.mockResolvedValue(mockPlan as any);
     mockQueryCreate.mockResolvedValue({ id: "query-1" });
     mockFetcher.fetchCrimes.mockResolvedValue(mockCrimes as any);
+    mockQueryFindUnique.mockResolvedValue({
+      // ← add this
+      id: "query-1",
+      results: mockCrimes,
+    });
 
     const res = await request(app)
       .post("/query")

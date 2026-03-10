@@ -7,8 +7,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "@deck.gl/aggregation-layers": "^9.2.11",
+    "@deck.gl/layers": "^9.2.11",
+    "@deck.gl/mapbox": "^9.2.11",
+    "@deck.gl/react": "^9.2.11",
+    "@luma.gl/core": "^9.2.6",
+    "@luma.gl/webgl": "^9.2.6",
+    "deck.gl": "^9.2.11",
+    "maplibre-gl": "^4.7.1",
+    "pmtiles": "^4.4.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-map-gl": "^7.1.9"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",

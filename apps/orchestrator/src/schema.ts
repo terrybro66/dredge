@@ -1,20 +1,10 @@
 import OpenAI from "openai";
+import { z } from "zod";
 import { PrismaClient } from "@prisma/client";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Schema & Types ────────────────────────────────────────────────────────────
 
-export type SchemaOp =
-  | { op: "USE_EXISTING" }
-  | { op: "ADD_COLUMN"; table: string; column: string; type: string };
-
-interface ColumnInfo {
-  column_name: string;
-  data_type: string;
-}
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const ALLOWED_PG_TYPES = new Set([
+const ALLOWED_PG_TYPES = [
   "text",
   "integer",
   "bigint",
@@ -22,11 +12,31 @@ const ALLOWED_PG_TYPES = new Set([
   "double precision",
   "jsonb",
   "timestamptz",
-]);
+] as const;
+
+const AddColumnSchema = z.object({
+  op: z.literal("ADD_COLUMN"),
+  table: z.literal("crime_results"),
+  column: z
+    .string()
+    .regex(/^[a-z_][a-z0-9_]*$/, "Column must be snake_case lowercase"),
+  type: z.enum(ALLOWED_PG_TYPES, {
+    error: `Schema LLM suggested disallowed type`,
+  }),
+});
+
+export type SchemaOp = { op: "USE_EXISTING" } | z.infer<typeof AddColumnSchema>;
 
 // Safe ALTER TABLE pattern: only ADD COLUMN, known table, safe identifier chars
 const SAFE_ALTER_REGEX =
   /^ALTER TABLE "?crime_results"? ADD COLUMN "?([a-z_][a-z0-9_]*)"? (text|integer|bigint|boolean|double precision|jsonb|timestamptz)$/i;
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface ColumnInfo {
+  column_name: string;
+  data_type: string;
+}
 
 // ── Client ────────────────────────────────────────────────────────────────────
 
@@ -39,10 +49,6 @@ function getClient(): OpenAI {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/**
- * Fetch current column names on the CrimeResult table directly from
- * information_schema so we don't rely on Prisma's generated types.
- */
 async function getCurrentColumns(prisma: PrismaClient): Promise<string[]> {
   const rows = await prisma.$queryRaw<ColumnInfo[]>`
     SELECT column_name, data_type
@@ -53,9 +59,6 @@ async function getCurrentColumns(prisma: PrismaClient): Promise<string[]> {
   return rows.map((r) => r.column_name);
 }
 
-/**
- * Find keys in sampleRow that don't exist as columns yet.
- */
 function findNewKeys(
   sampleRow: Record<string, unknown>,
   existingColumns: string[],
@@ -64,11 +67,6 @@ function findNewKeys(
   return Object.keys(sampleRow).filter((key) => !existing.has(key));
 }
 
-/**
- * Ask DeepSeek which Postgres type best fits each new key,
- * and return a single SchemaOp for the first new key.
- * (One migration per query keeps ALTER TABLE logic simple.)
- */
 async function askLlmForSchemaOp(
   newKeys: string[],
   sampleRow: Record<string, unknown>,
@@ -86,7 +84,7 @@ A crime data table needs new columns. Given these new field names and sample val
 New fields and sample values:
 ${JSON.stringify(sampleValues, null, 2)}
 
-Allowed Postgres types: ${[...ALLOWED_PG_TYPES].join(", ")}
+Allowed Postgres types: ${ALLOWED_PG_TYPES.join(", ")}
 
 Return ONLY this JSON, no prose:
 {
@@ -124,35 +122,16 @@ Rules:
     throw new Error(`Schema LLM returned invalid JSON: ${cleaned}`);
   }
 
-  const obj = parsed as Record<string, unknown>;
-
-  if (
-    obj["op"] !== "ADD_COLUMN" ||
-    !obj["table"] ||
-    !obj["column"] ||
-    !obj["type"]
-  ) {
-    throw new Error(`Schema LLM returned incomplete op: ${cleaned}`);
+  const result = AddColumnSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error(result.error.issues[0].message);
   }
 
-  if (!ALLOWED_PG_TYPES.has(obj["type"] as string)) {
-    throw new Error(`Schema LLM suggested disallowed type: "${obj["type"]}"`);
-  }
-
-  return {
-    op: "ADD_COLUMN",
-    table: obj["table"] as string,
-    column: obj["column"] as string,
-    type: obj["type"] as string,
-  };
+  return result.data;
 }
 
 // ── Main exports ──────────────────────────────────────────────────────────────
 
-/**
- * Inspect the current schema and decide what operation (if any) is needed.
- * Never calls the LLM if no new columns are required.
- */
 export async function decideSchemaOp(
   prisma: PrismaClient,
   sampleRow: Record<string, unknown>,
@@ -167,10 +146,6 @@ export async function decideSchemaOp(
   return askLlmForSchemaOp(newKeys, sampleRow);
 }
 
-/**
- * Apply a SchemaOp to the database.
- * Validates the generated SQL against a safe pattern before executing.
- */
 export async function applySchemaOp(
   prisma: PrismaClient,
   op: SchemaOp,

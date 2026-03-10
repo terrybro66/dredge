@@ -42,16 +42,34 @@ queryRouter.post("/", async (req: Request, res: Response) => {
 
     // 4. Evolve schema if needed
     if (crimes.length > 0) {
+      const c = crimes[0];
       const sampleRow = {
-        category: crimes[0].category,
-        month: crimes[0].month,
-        street: crimes[0].location.street.name,
-        latitude: crimes[0].location.latitude,
-        longitude: crimes[0].location.longitude,
-        outcome_category: crimes[0].outcome_status?.category ?? null,
-        outcome_date: crimes[0].outcome_status?.date ?? null,
-        location_type: crimes[0].location_type,
-        context: crimes[0].context,
+        category: c.category,
+        month: c.month,
+        street: c.location.street.name,
+        latitude: c.location.latitude,
+        longitude: c.location.longitude,
+        outcome_category: c.outcome_status?.category ?? null,
+        outcome_date: c.outcome_status?.date ?? null,
+        location_type: c.location_type,
+        context: c.context,
+        // spread any extra fields the API returns that aren't in the known set
+        ...Object.fromEntries(
+          Object.entries(c).filter(
+            ([key]) =>
+              ![
+                "category",
+                "month",
+                "location",
+                "outcome_status",
+                "location_type",
+                "context",
+                "id",
+                "persistent_id",
+                "location_subtype",
+              ].includes(key),
+          ),
+        ),
       };
 
       const schemaOp = await decideSchemaOp(prisma, sampleRow);
@@ -61,13 +79,18 @@ queryRouter.post("/", async (req: Request, res: Response) => {
     // 5. Store results
     await storeResults(queryRecord.id, plan, crimes);
 
-    // 6. Return response
+    // 6. Fetch stored rows and return
+    const stored = await prisma.query.findUnique({
+      where: { id: queryRecord.id },
+      include: { results: true },
+    });
+
     return res.status(200).json({
       query_id: queryRecord.id,
       plan,
       count: crimes.length,
       viz_hint: plan.viz_hint,
-      results: crimes,
+      results: stored?.results ?? [],
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

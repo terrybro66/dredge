@@ -1,21 +1,21 @@
-import type { QueryResult, Crime } from "../App";
+import type { QueryResponse, CrimeResult } from "../App";
 
 interface Props {
-  result: QueryResult;
+  result: QueryResponse;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
   "all-crime": "All Crime",
   "anti-social-behaviour": "Anti-Social Behaviour",
   "bicycle-theft": "Bicycle Theft",
-  "burglary": "Burglary",
+  burglary: "Burglary",
   "criminal-damage-arson": "Criminal Damage & Arson",
-  "drugs": "Drugs",
+  drugs: "Drugs",
   "other-theft": "Other Theft",
   "possession-of-weapons": "Possession of Weapons",
   "public-order": "Public Order",
-  "robbery": "Robbery",
-  "shoplifting": "Shoplifting",
+  robbery: "Robbery",
+  shoplifting: "Shoplifting",
   "theft-from-the-person": "Theft from Person",
   "vehicle-crime": "Vehicle Crime",
   "violent-crime": "Violent Crime",
@@ -24,16 +24,19 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 function formatDate(yyyymm: string) {
   const [year, month] = yyyymm.split("-");
-  return new Date(parseInt(year), parseInt(month) - 1).toLocaleDateString("en-GB", {
-    month: "long",
-    year: "numeric",
-  });
+  return new Date(parseInt(year), parseInt(month) - 1).toLocaleDateString(
+    "en-GB",
+    {
+      month: "long",
+      year: "numeric",
+    },
+  );
 }
 
-function BarChart({ crimes }: { crimes: Crime[] }) {
+function BarChart({ crimes }: { crimes: CrimeResult[] }) {
   const counts: Record<string, number> = {};
   for (const c of crimes) {
-    counts[c.location.street.name] = (counts[c.location.street.name] ?? 0) + 1;
+    counts[c.street] = (counts[c.street] ?? 0) + 1;
   }
 
   const sorted = Object.entries(counts)
@@ -46,7 +49,9 @@ function BarChart({ crimes }: { crimes: Crime[] }) {
     <div className="chart">
       {sorted.map(([street, count]) => (
         <div key={street} className="chart-row">
-          <span className="chart-label">{street.replace("On or near ", "")}</span>
+          <span className="chart-label">
+            {street.replace("On or near ", "")}
+          </span>
           <div className="chart-bar-wrap">
             <div
               className="chart-bar"
@@ -60,7 +65,7 @@ function BarChart({ crimes }: { crimes: Crime[] }) {
   );
 }
 
-function Table({ crimes }: { crimes: Crime[] }) {
+function Table({ crimes }: { crimes: CrimeResult[] }) {
   return (
     <div className="table-wrap">
       <table className="results-table">
@@ -76,12 +81,14 @@ function Table({ crimes }: { crimes: Crime[] }) {
           {crimes.map((c, i) => (
             <tr key={c.persistent_id || i}>
               <td>
-                <span className="tag">{CATEGORY_LABELS[c.category] ?? c.category}</span>
+                <span className="tag">
+                  {CATEGORY_LABELS[c.category] ?? c.category}
+                </span>
               </td>
-              <td>{c.location.street.name.replace("On or near ", "")}</td>
+              <td>{c.street.replace("On or near ", "")}</td>
               <td>{c.month}</td>
-              <td className={c.outcome_status ? "" : "muted"}>
-                {c.outcome_status?.category ?? "Under investigation"}
+              <td className={c.outcome_category ? "" : "muted"}>
+                {c.outcome_category ?? "Under investigation"}
               </td>
             </tr>
           ))}
@@ -91,10 +98,10 @@ function Table({ crimes }: { crimes: Crime[] }) {
   );
 }
 
-function MapPlaceholder({ crimes }: { crimes: Crime[] }) {
+function MapPlaceholder({ crimes }: { crimes: CrimeResult[] }) {
   const counts: Record<string, number> = {};
   for (const c of crimes) {
-    counts[c.location.street.name] = (counts[c.location.street.name] ?? 0) + 1;
+    counts[c.street] = (counts[c.street] ?? 0) + 1;
   }
   const hotspots = Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
@@ -110,7 +117,9 @@ function MapPlaceholder({ crimes }: { crimes: Crime[] }) {
           {hotspots.map(([street, count], i) => (
             <div key={street} className="hotspot-item">
               <span className="hotspot-rank">#{i + 1}</span>
-              <span className="hotspot-street">{street.replace("On or near ", "")}</span>
+              <span className="hotspot-street">
+                {street.replace("On or near ", "")}
+              </span>
               <span className="hotspot-count">{count} incidents</span>
             </div>
           ))}

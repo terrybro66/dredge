@@ -1,40 +1,9 @@
 import OpenAI from "openai";
+import { z } from "zod";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Schema & Types ────────────────────────────────────────────────────────────
 
-export type VizHint = "map" | "bar" | "table";
-
-export type CrimeCategory =
-  | "all-crime"
-  | "anti-social-behaviour"
-  | "bicycle-theft"
-  | "burglary"
-  | "criminal-damage-arson"
-  | "drugs"
-  | "other-theft"
-  | "possession-of-weapons"
-  | "public-order"
-  | "robbery"
-  | "shoplifting"
-  | "theft-from-the-person"
-  | "vehicle-crime"
-  | "violent-crime"
-  | "other-crime";
-
-export interface QueryPlan {
-  /** UK Police API crime category slug */
-  category: CrimeCategory;
-  /** Month in YYYY-MM format (e.g. "2024-01") */
-  date: string;
-  /** Polygon string for the Police API: "lat,lng:lat,lng:lat,lng:..." */
-  poly: string;
-  /** Hint for the frontend renderer */
-  viz_hint: VizHint;
-}
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const CRIME_CATEGORIES: Record<CrimeCategory, string> = {
+const CRIME_CATEGORIES = {
   "all-crime": "All crime types combined",
   "anti-social-behaviour": "Anti-social behaviour",
   "bicycle-theft": "Bicycle theft",
@@ -50,9 +19,37 @@ const CRIME_CATEGORIES: Record<CrimeCategory, string> = {
   "vehicle-crime": "Vehicle crime",
   "violent-crime": "Violence and sexual offences",
   "other-crime": "Other crime",
-};
+} as const;
 
-const VALID_VIZ_HINTS: VizHint[] = ["map", "bar", "table"];
+const QueryPlanSchema = z.object({
+  category: z.enum(Object.keys(CRIME_CATEGORIES) as [string, ...string[]], {
+    required_error: "Missing required fields",
+    invalid_type_error: "Missing required fields",
+  }),
+  date: z
+    .string({
+      required_error: "Missing required fields",
+      invalid_type_error: "Missing required fields",
+    })
+    .regex(/^\d{4}-\d{2}$/, "Date must be YYYY-MM format"),
+  poly: z
+    .string({
+      required_error: "Missing required fields",
+      invalid_type_error: "Missing required fields",
+    })
+    .refine(
+      (s) => s.includes(",") && s.includes(":"),
+      "Invalid polygon format",
+    ),
+  viz_hint: z.enum(["map", "bar", "table"], {
+    required_error: "Invalid viz_hint",
+    invalid_type_error: "Invalid viz_hint",
+  }),
+});
+
+export type QueryPlan = z.infer<typeof QueryPlanSchema>;
+export type CrimeCategory = keyof typeof CRIME_CATEGORIES;
+export type VizHint = "map" | "bar" | "table";
 
 // ── System prompt ─────────────────────────────────────────────────────────────
 
@@ -96,57 +93,13 @@ function stripFences(text: string): string {
     .trim();
 }
 
-function validateQueryPlan(raw: unknown): QueryPlan {
-  if (typeof raw !== "object" || raw === null) {
-    throw new Error("Missing required fields");
-  }
-
-  const obj = raw as Record<string, unknown>;
-
-  if (!obj["category"] || !obj["date"] || !obj["poly"] || !obj["viz_hint"]) {
-    throw new Error("Missing required fields");
-  }
-
-  if (
-    typeof obj["category"] !== "string" ||
-    !(obj["category"] in CRIME_CATEGORIES)
-  ) {
-    throw new Error(`Invalid category: "${obj["category"]}"`);
-  }
-
-  if (typeof obj["date"] !== "string" || !/^\d{4}-\d{2}$/.test(obj["date"])) {
-    throw new Error(`Invalid date format: "${obj["date"]}"`);
-  }
-
-  if (
-    typeof obj["poly"] !== "string" ||
-    !obj["poly"].includes(",") ||
-    !obj["poly"].includes(":")
-  ) {
-    throw new Error(`Invalid poly: "${obj["poly"]}"`);
-  }
-
-  if (!VALID_VIZ_HINTS.includes(obj["viz_hint"] as VizHint)) {
-    throw new Error(`Invalid viz_hint: "${obj["viz_hint"]}"`);
-  }
-
-  return {
-    category: obj["category"] as CrimeCategory,
-    date: obj["date"] as string,
-    poly: obj["poly"] as string,
-    viz_hint: obj["viz_hint"] as VizHint,
-  };
-}
-
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export async function parseIntent(rawText: string): Promise<QueryPlan> {
-  console.log("API KEY:", process.env.DEEPSEEK_API_KEY?.slice(-4));
   if (!rawText || rawText.trim().length === 0) {
     throw new Error("Query text must not be empty");
   }
 
-  // Instantiated here (not at module level) so mocks are in place during tests
   const client = new OpenAI({
     apiKey: process.env.DEEPSEEK_API_KEY,
     baseURL: "https://api.deepseek.com",
@@ -177,5 +130,32 @@ export async function parseIntent(rawText: string): Promise<QueryPlan> {
     );
   }
 
-  return validateQueryPlan(parsed);
+  const result = QueryPlanSchema.safeParse(parsed);
+  if (!result.success) {
+    const issues = result.error.issues;
+
+    const hasMissingFields = issues.some(
+      (i) =>
+        ["category", "date", "poly", "viz_hint"].includes(
+          i.path[0] as string,
+        ) && i.code === "invalid_type",
+    );
+
+    const hasInvalidVizHint = issues.some(
+      (i) => i.path[0] === "viz_hint" && i.code !== "invalid_type",
+    );
+
+    if (hasMissingFields) {
+      throw new Error("Missing required fields");
+    }
+    if (hasInvalidVizHint) {
+      throw new Error("Invalid viz_hint");
+    }
+
+    throw new Error(
+      `Failed to parse intent: ${issues.map((i) => i.message).join(", ")}`,
+    );
+  }
+
+  return result.data;
 }
